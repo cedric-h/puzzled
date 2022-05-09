@@ -1,10 +1,12 @@
+const log = x => (console.log(x), x);
+
 await new Promise(res => window.onload = res);
 
 /* let's get this party started */
 const canvas = document.querySelector("canvas");
 const ctx = canvas.getContext('2d');
 
-const TILE_PX = 48;
+const TILE_PX = 32;
 const w = Math.floor((160*4)/TILE_PX);
 const h = Math.floor((128*4)/TILE_PX);
 
@@ -20,7 +22,8 @@ const art = Object.fromEntries(await Promise.all(
     "bed",         "ghost",       "player",      "trident",
     "bow",         "grass",       "pot",         "turtle",
     "box",         "potion",      "wall",        "palm",
-    "flower",      "bush",        "trees"
+    "flower",      "bush",        "trees",
+    "heart_full",  "heart_empty"
   ].map(x => new Promise(res => {
     let img = new Image();
     img.src = `img/${x}.png`;
@@ -29,220 +32,233 @@ const art = Object.fromEntries(await Promise.all(
   }))
 ));
 
-function loop(handler) {
-  window.onkeydown = ev => handler({ key: ev.key });
-  handler({});
+let mouse = { x: 0, y: 0 };
+let mouseTile = () => [floor(mouse.x / TILE_PX),
+                       floor(mouse.y / TILE_PX)];
+canvas.onmousemove = ev => mouse = { x: ev.offsetX, y: ev.offsetY };
+
+const { sign, abs, floor, cos, sin, random } = Math;
+const cardinalDelta = (a, b) => {
+    let [dx, dy] = [a[0] - b[0],
+                    a[1] - b[1]];
+    if (abs(dx) > abs(dy)) dy = 0, dx = sign(dx) || 1;
+    else                   dx = 0, dy = sign(dy) || 1;
+    return [dx, dy];
+};
+const onMap = (x, y) => x < w && x >= 0 &&
+                        y < h && y >= 0;
+
+let map = {};
+const mapSet = (obj, x, y) =>
+  map[[floor(x), floor(y)]] = obj;
+const mapNeighbors = (x, y) => {
+  return [
+    [x-1, y  ],
+    [x+1, y  ],
+    [x  , y+1],
+    [x  , y-1],
+  ];
+}
+const mapPos = obj => {
+  for (const pos in map)
+    if (map[pos] == obj)
+      return pos.split(",").map(x => +x);
+}
+const mapMove = (obj, nx, ny) => {
+  for (const pos in map)
+    if (map[pos] == obj)
+      delete map[pos];
+  mapSet(obj, nx, ny);
 }
 
-/* ENGINE FUNCTIONS */
-const grid = () => {
-  const ret = [...Array(w)].map(() => [...Array(h)].map(x => ({})));
-  for (const tile of ret.flat())
-    tile.grid = ret;
-  ret.get = tag => ret.flat().filter(x => x.art == art[tag]);
-  return ret;
-}
+let state = "movin";
+const player = { art: art.ghost };
+let hp = 3;
 
-const xyOfTile = tile => {
-  for (const [x, row] of Object.entries(tile.grid)) {
-    const y = row.indexOf(tile);
-    if (y >= 0)
-      return [+x, y];
-  }
-  throw new Error("no such tile!");
-}
+let level = 0;
+const levels = [
+  () => {
+    map = {};
+    state = "movin";
+    mapSet(player, 7, 7);
+    mapSet({ art: art.axe },  9, 7);
+    mapSet({ art: art.axe }, 10, 7);
+    mapSet({ art: art.axe }, 11, 7);
 
-const push = (tile, dir, onObstruct=()=>false) => {
-  let dx, dy;
-  dx = dy = 0;
+    mapSet({ art: art.door},  6, 4);
+    mapSet({ art: art.snek},  3, 7);
+  },
+  () => {
+    map = {};
+    state = "movin";
+    mapSet(player, 7, 7);
+    mapSet({ art: art.axe },  9, 7);
+    mapSet({ art: art.axe },  9, 6);
+    mapSet({ art: art.axe },  9, 5);
 
-       if (dir ==    "up") dy--;
-  else if (dir ==  "down") dy++;
-  else if (dir ==  "left") dx--;
-  else if (dir == "right") dx++;
-  else throw new Error("no such direction!");
+    mapSet({ art: art.door},  5, 4);
+    mapSet({ art: art.axe },  3, 7);
+  },
+  () => {
+    map = {};
+    state = "movin";
+    mapSet(player, w/2, h/2);
 
-  const [x, y] = xyOfTile(tile);
+    const circle = [
+      'axe', 'snek',
+      'axe', 'axe',
+      'axe', 'axe',
+      'axe', 'snek',
+      'axe', 'axe',
+      'axe'
+    ];
+    for (const [i, img] of Object.entries(circle)) {
+      const t = i / circle.length * Math.PI * 2;
 
-  let obstructor;
-  let goes = 1;
-
-  const cb = () => (goes--, onObstruct(obstructor, dir, () => goes++));
-
-  do {
-    obstructor = tile.grid[x + dx];
-    if (!obstructor) return false;
-    obstructor = obstructor[y + dy]
-    if (!obstructor) return false;
-
-    if (!obstructor.art) {
-      tile.grid[x][y] = obstructor;
-      tile.grid[x + dx][y + dy] = tile;
-      return true;
+      mapSet(
+        { art: art[img] },
+        w/2 + cos(t) * 6,
+        h/2 + sin(t) * 6
+      );
     }
-  } while((cb(), goes > 0));
-  return false;
-}
-
-const { floor, random } = Math;
-const choose = arr => arr[floor(random() * arr.length)];
-/* .. */
-
-function draw(grids) {
-  const { width, height } = canvas;
-  ctx.fillStyle = "rgb(47, 43, 49)";
-  ctx.fillRect(0, 0, width, height);
-
-  const { entries } = Object;
-  for (const grid of grids)
-    for (const [x, row] of entries(grid))
-      for (const [y, tile] of entries(row))
-        if (tile.art)
-          ctx.drawImage(tile.art, x*TILE_PX, y*TILE_PX, TILE_PX, TILE_PX);
-}
-
-const p = ({ legend, pattern, after }) => {
-  const gridify = str => str
-    .trim()
-    .split('\n')
-    .map(x => x.trim().split('').map(x => legend[x]));
-
-  return { pattern: gridify(pattern), after };
-}
-function apply(patterns, grid) {
-  for (const { pattern, after } of patterns) {
-    for (let x = 0; x < w; x++)
-      for (let y = 0; y < h; y++) {
-        let match = true;
-        const { entries } = Object;
-        for (const [dx, row] of entries(pattern))
-          for (const [dy, test] of entries(row)) {
-            if (!match) continue;
-
-            let t = grid[x + +dx];
-            if (!t) { match = false; continue };
-            t = t[y + +dy];
-            if (!t) { match = false; continue };
-
-            match &&= test(t);
-          }
-        if (match) {
-          for (const [dx, row] of entries(pattern))
-            for (const [dy, test] of entries(row))
-              after(grid[x + +dx][y + +dy]);
-          return;
-        }
-      }
-  }
-}
-
-
- 
-/* USERLAND */
-const trees = [art.oak, art.palm, art.pine];
-
-const main = grid();
-
-const grass = grid();
-for (let x = 0; x < w; x++)
-  for (let y = 0; y < h; y++)
-    grass[x][y].art = art.grass;
-
-const reset = () => {
-  const [player] = main.get("player");
-  if (player) delete player.art;
-
-  for (let x = 0; x < 7; x++)
-    for (let y = 0; y < 6; y++)
-      grass[3 + x][2 + y].art = choose(trees);
-}
-const lvl = (function *() {
-  const ghost = (x, y) => {
-    main[x][y].art = art.ghost;
-    delete grass[x][y].art;
-  }
-
-  reset();
-  main[2][2].art = art.player;
-  ghost(5, 5);
-  yield;
-  reset();
-  main[2][2].art = art.player;
-  ghost(5, 6);
-  ghost(8, 4);
-  yield;
-  reset();
-  main[2][2].art = art.player;
-  ghost(5, 6);
-  ghost(8, 4);
-  ghost(8, 6);
-  yield;
-  alert("you win");
-})();
-lvl.next();
-
-
-const clearCrate = t => {
-  if (t.art == art.crate)
-    delete t.art;
-}
-const legend = { 'c': t => t.art == art.crate,
-                 '_': t => t.art != art.crate };
-const patterns = [
-  p({
-    legend,
-    pattern: 
-      `ccc`,
-    after: clearCrate
-  }),
-  p({
-    legend,
-    pattern: 
-      `c
-       c
-       c`,
-    after: clearCrate
-  }),
+  },
 ];
+levels[level]();
 
-let won;
-loop(ev => {
-  let [player] = main.get("player");
-  if (!player) {
-    if (ev.key == 'r')
-      (reset(), [player] = main.get("player"));
-    else
-      return;
+
+/* rot should be 0..3 */
+const drawTile = (art, x, y, rot=0, alpha=1) => {
+  ctx.save();
+  ctx.translate(floor(x)*TILE_PX + TILE_PX/2,
+                floor(y)*TILE_PX + TILE_PX/2);
+  ctx.rotate(floor(rot)%4 * Math.PI/2);
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(art, TILE_PX/-2, TILE_PX/-2, TILE_PX, TILE_PX);
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+const axeFSM = {
+  throwin: {
+    draw() {
+      const [dx, dy] = cardinalDelta(mouseTile(), mapPos(player));
+      this.lastDelta = [dx, dy];
+      let [x, y] = mapPos(player);
+      drawTile(art.axe, x+dx, y+dy, Date.now() / 500);
+    },
+    mousedown(ev) {
+      const axe = { art: art.axe };
+
+      let [dx, dy] = this.lastDelta;
+      let [x, y] = mapPos(player);
+      x += dx, y += dy;
+
+      state = "flyin";
+      mapSet(axe, x, y);
+      axeFSM.flyin.axe = axe;
+      axeFSM.flyin.dir = [dx, dy];
+    }
+  },
+  movin: {
+    moves() {
+      let ret = [];
+
+      const tryGo = (dx, dy) => {
+        let [x, y] = mapPos(player);
+        while (!map[[x+dx, y+dy]] && onMap(x+dx, y+dy))
+          x += dx, y += dy;
+
+        let wins = false;
+        if (map[[x+dx, y+dy]]?.art == art.door)
+          x += dx, y += dy, wins = true;
+
+        let underMouse = mouseTile()+"" == ""+[x, y];
+        ret.push({ x, y, underMouse, wins });
+      };
+
+      for (const dx of [1, -1]) tryGo(dx, 0);
+      for (const dy of [1, -1]) tryGo(0, dy);
+      return ret;
+    },
+    draw() {
+      for (const { x, y, underMouse} of this.moves()) {
+        let alpha = 0.4 + 0.07*Math.sin(x + y + Date.now()/300);
+        if (underMouse)
+          alpha += 0.4;
+
+        drawTile(art.ghost, x, y, 0, alpha);
+      }
+    },
+    mousedown() {
+      for (const { x, y, underMouse, wins } of this.moves())
+        if (underMouse) {
+          mapMove(player, x, y);
+
+          if (wins) {
+            levels[++level]();
+            return;
+          }
+
+          if (mapNeighbors(x, y).some(pos => map[pos]?.art == art.snek))
+            if (hp-- < 1)
+              alert("you died."),
+              level = 0,
+              levels[level]();
+
+          let localAxePos = mapNeighbors(x, y).find(pos => map[pos]?.art == art.axe);
+          if (localAxePos) {
+            delete map[localAxePos];
+            state = "throwin";
+            return;
+          }
+
+          state = "movin";
+        }
+    },
+  },
+  flyin: {
+    tick() {
+      const [dx, dy] = this.dir;
+      let [x, y] = mapPos(this.axe);
+      x += dx, y += dy;
+
+      if (map[[x, y]] || !onMap(x+dx, y+dy))
+        state = "movin";
+
+      if (map[[x, y]]?.art != art.axe)
+        mapMove(this.axe, x, y);
+    }
+  },
+};
+
+window.onkeydown = ev => {
+  if (ev.key == "r")
+    levels[level]();
+};
+
+window.onmousedown = () => {
+  if (axeFSM[state].mousedown)
+      axeFSM[state].mousedown();
+};
+setInterval(() => {
+  if (axeFSM[state].tick)
+      axeFSM[state].tick();
+}, 200);
+
+requestAnimationFrame(function frame(now) {
+  ctx.fillStyle = "rgb(47, 43, 49)";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  for (let i = 0; i < 3; i++)
+    drawTile((i < hp) ? art.heart_full : art.heart_empty, i, 0);
+
+  for (const pos in map) {
+    const [x, y] = pos.split(",").map(x => +x);
+    drawTile(map[pos].art, x, y);
   }
 
-  const [x, y] = xyOfTile(player);
-       if (ev.key == 'w') push(player,    "up");
-  else if (ev.key == 's') push(player,  "down");
-  else if (ev.key == 'a') push(player,  "left");
-  else if (ev.key == 'd') push(player, "right");
+  if (axeFSM[state].draw)
+      axeFSM[state].draw();
 
-  const [nx, ny] = xyOfTile(player);
-  if (grass[nx][ny].art == art.flower) {
-    player.art = art.fire;
-
-    setTimeout(() => {
-      player.art = art.meat;
-      draw([grass, main]);
-    }, 1000);
-  }
-
-  if (trees.includes(grass[x][y].art)) {
-    grass[x][y].art = art.fire;
-
-    setTimeout(() => {
-      grass[x][y].art = art.flower;
-      draw([grass, main]);
-    }, 300);
-  }
-
-  if (!grass.flat().some(x => trees.includes(x.art)))
-    lvl.next(), draw([grass, main]);
-
-  draw([grass, main]);
+  requestAnimationFrame(frame);
 });
-/* ... */
