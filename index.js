@@ -23,7 +23,7 @@ const art = Object.fromEntries(await Promise.all(
     "bow",          "grass",       "pot",         "turtle",
     "box",          "potion",      "wall",        "palm",
     "flower",       "bush",        "trees",
-    "womanArmor",   "womanPurple",
+    "womanArmor",   "womanPurple", "cursor",      "pointer",
     "castle",       "coin",        "crab",        "cross",
     "ent",          "eye",         "house",       "hut",
     "manBlueArmor", "manGreen",    "manHelm",
@@ -37,9 +37,7 @@ const art = Object.fromEntries(await Promise.all(
   }))
 ));
 
-const { sign, abs, floor, cos, sin, random } = Math;
-
-let hp = 3;
+const { sign, abs, round, floor, cos, sin, random } = Math;
 
 let map = {};
 const onMap = (x, y) => x < w && x >= 0 &&
@@ -81,9 +79,6 @@ const drawTile = (art, x, y, rot=0, alpha=1) => {
 requestAnimationFrame(function frame(now) {
   ctx.fillStyle = "rgb(47, 43, 49)";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  for (let i = 0; i < 3; i++)
-    drawTile((i < hp) ? art.heart_full : art.heart_empty, i, 0);
 
   for (const pos in map) {
     const [x, y] = pos.split(",").map(x => +x);
