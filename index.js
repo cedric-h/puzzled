@@ -67,56 +67,112 @@ const makeMap = () => ({
   }
 })
 
-let map, goalMap;
+let map, fenceMap;
+let goal = { art: art.bush };
 let player = { art: art.player };
 
-let level = 0;
+let level = 1;
 const levels = [
 `
-
-
-
-      wwwwwwwww
-      w    ooow
-      w w wowow
-      w w  ooow
-      w xxx w w
-      w xpx   w
-      w xxxww w
-      w       w
-      wwwwwwwww
+       wwwww
+   wwwww   w
+  w  00    ww
+ w  wwwww    w
+ w w  www  eww
+w  w 0   wwww
+ w   w p w
+  ww wwwww
+   ww
 `,
 `
 
 
-     wwwwwwwwwww
-     w    p    w
-     w x x x x w
-     w  x x x  w
-     w w x x w w
-     w w  x  w w
-     w ww o ww w
-     w w o o w w
-     wwwo o owww
-      wo o o ow
-      wwwwwwwww
+
+     wwwwwwwwww
+     wwww1 1www
+     wo    woww
+     wo0w0 0oew
+     wooww woow
+     wwwww1wwww
+     wwwwwpwwww
+     0wwwwwwwww
 `,
+];
+
+const legend = { '0': t => t.art == art.crate,
+                 '1': t => t.art == art.house,
+                 '_': t => t.art != art.crate };
+const p = ({ pattern, after }) => {
+  const gridify = str => str
+    .trim()
+    .split('\n')
+    .map(x => x.trim().split('').map(x => legend[x]));
+
+  return { pattern: gridify(pattern), after };
+}
+function apply(patterns, grid) {
+  for (const { pattern, after } of patterns) {
+    for (let x = 0; x < w; x++)
+      for (let y = 0; y < h; y++) {
+        let match = true;
+        const { entries } = Object;
+        for (const [dx, row] of entries(pattern))
+          for (const [dy, test] of entries(row)) {
+            if (!match) continue;
+
+            let t = map.data[[x + +dx, y + +dy]];
+            if (!t) { match = false; continue };
+
+            match &&= test(t);
+          }
+        if (match) {
+          for (const [dx, row] of entries(pattern))
+            for (const [dy, test] of entries(row))
+              after(map.data[[x + +dx, y + +dy]]);
+          return;
+        }
+      }
+  }
+}
+const clearCrate = t => {
+  if (t.art == art.house || t.art == art.crate)
+    delete map.data[map.pos(t)];
+}
+const patterns = [
+  p({ pattern: `000`, after: clearCrate }),
+  p({ pattern: `111`, after: clearCrate }),
+  p({
+    pattern: 
+      `0
+       0
+       0`,
+    after: clearCrate
+  }),
+  p({
+    pattern: 
+      `1
+       1
+       1`,
+    after: clearCrate
+  }),
 ];
 
 const loadLevel = () => {
   map = makeMap();
-  goalMap = makeMap();
+  fenceMap = makeMap();
 
   const splentries = (t, s) => Object.entries(t.split(s));
   for (const [y, row] of splentries(levels[level], '\n'))
     for (const [x, letter] of splentries(row, '')) {
            if (letter == ' ') ;
       else if (letter == 'p') map.set(player, x, y);
-      else if (letter == 'o') goalMap.set({ art: art.box }, x, y);
+      else if (letter == 'e') goal = [x, y];
+      else if (letter == 'o') fenceMap.set({ art: art.box }, x, y);
       else
         map.set({ art: log(({
           'w': art.wall, 
-          'x': art.crate,
+          '0': art.crate,
+          '1': art.house,
         })[letter]) }, x, y);
     }
 }
@@ -132,7 +188,7 @@ window.onkeydown = ev => {
 
   let n = 0;
   (function push(tile) {
-    if (n > 1) return false;
+    if (n > 2) return false;
     n++;
 
     let [x, y] = map.pos(tile);
@@ -146,11 +202,10 @@ window.onkeydown = ev => {
     map.move(tile, x, y);
     return true;
   })(player);
+
+  apply(patterns);
   
-  if (Object.keys(goalMap.data).every(pos => 
-    map.data[pos]?.art == art.crate &&
-        goalMap.data[pos]?.art == art.box
-  ))
+  if (goal+"" == map.pos(player))
     level++,
     loadLevel();
 };
@@ -178,7 +233,8 @@ requestAnimationFrame(function frame(now) {
     }
   };
   drawMap(map);
-  drawMap(goalMap, 0.5);
+  drawMap(fenceMap, 0.5);
+  drawTile(art.bush, ...goal, 0, 0.7 + 0.05*Math.sin(Date.now() / 240));
 
   requestAnimationFrame(frame);
 });
